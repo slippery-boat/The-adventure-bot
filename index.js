@@ -55,10 +55,17 @@ const VERIFY_CHANNEL_ID = process.env.VERIFY_CHANNEL_ID;
 const GRADE_7_ROLE_ID = process.env.GRADE_7_ROLE_ID;
 const GRADE_8_ROLE_ID = process.env.GRADE_8_ROLE_ID;
 const OWNER_ID = process.env.OWNER_ID;
+const ADMIN_ROLE_ID = process.env.ADMIN_ROLE_ID;
+
+// Check if a user is the owner or has the admin role
+function isAdmin(message) {
+  return message.author.id === OWNER_ID || message.member.roles.cache.has(ADMIN_ROLE_ID);
+}
 
 client.once('ready', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
   console.log(`OWNER_ID: ${OWNER_ID}`);
+  console.log(`ADMIN_ROLE_ID: ${ADMIN_ROLE_ID}`);
   await setupDatabase();
   await postVerifyMessage();
 });
@@ -151,11 +158,7 @@ client.on('messageCreate', async (message) => {
 
   // Admin only — block swearing for a user
   if (message.content.startsWith('!swearblock')) {
-    console.log(`🔍 Swearblock command from ${message.author.tag} (ID: ${message.author.id})`);
-    console.log(`🔍 OWNER_ID is: ${OWNER_ID}`);
-    console.log(`🔍 Match: ${message.author.id === OWNER_ID}`);
-
-    if (message.author.id !== OWNER_ID) {
+    if (!isAdmin(message)) {
       message.reply('❌ You do not have permission to use this command.');
       return;
     }
@@ -184,7 +187,7 @@ client.on('messageCreate', async (message) => {
 
   // Admin only — unblock swearing for a user
   if (message.content.startsWith('!swearunblock')) {
-    if (message.author.id !== OWNER_ID) {
+    if (!isAdmin(message)) {
       message.reply('❌ You do not have permission to use this command.');
       return;
     }
@@ -198,7 +201,7 @@ client.on('messageCreate', async (message) => {
 
   // Admin only — shows full name privately via DM
   if (message.content.startsWith('!lookup')) {
-    if (message.author.id !== OWNER_ID) {
+    if (!isAdmin(message)) {
       message.reply('❌ You do not have permission to use this command.');
       return;
     }
