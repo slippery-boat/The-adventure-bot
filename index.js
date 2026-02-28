@@ -17,7 +17,20 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// Create table if it doesn't exist
+// Full swear word list
+const SWEAR_WORDS = [
+  'arse', 'arsehead', 'arsehole', 'ass', 'asshole', 'bastard', 'bitch',
+  'bloody', 'bollocks', 'brotherfucker', 'bugger', 'bullshit', 'child-fucker',
+  'cock', 'cocksucker', 'crap', 'cunt', 'dammit', 'damn', 'damned', 'dick',
+  'dick-head', 'dickhead', 'dumb-ass', 'dumbass', 'dyke', 'fag', 'faggot',
+  'father-fucker', 'fatherfucker', 'fuck', 'fucked', 'fucker', 'fucking',
+  'goddammit', 'goddamn', 'goddamned', 'goddamnit', 'godsdamn', 'hell',
+  'horseshit', 'jack-ass', 'jackass', 'kike', 'mother-fucker', 'motherfucker',
+  'nigga', 'nigra', 'pigfucker', 'piss', 'prick', 'pussy', 'shit', 'shite',
+  'sisterfuck', 'sisterfucker', 'slut', 'spastic', 'tranny', 'twat', 'wanker'
+];
+
+// Setup database tables
 async function setupDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS verified_users (
@@ -26,6 +39,12 @@ async function setupDatabase() {
       last_name TEXT,
       grade TEXT,
       display_name TEXT
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS swear_blocks (
+      discord_id TEXT PRIMARY KEY,
+      expires_at TIMESTAMPTZ
     )
   `);
   console.log('✅ Database ready');
@@ -74,9 +93,125 @@ async function postVerifyMessage() {
 client.on('guildMemberRemove', async (member) => {
   try {
     await pool.query('DELETE FROM verified_users WHERE discord_id = $1', [member.id]);
+    await pool.query('DELETE FROM swear_blocks WHERE discord_id = $1', [member.id]);
     console.log(`🗑️ Removed ${member.user.tag} from database (left server)`);
   } catch (err) {
     console.error('Error removing user from database:', err);
+  }
+});
+
+// Check messages for swear words
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+
+  // Check if user is swear blocked
+  const blockResult = await pool.query(
+    'SELECT * FROM swear_blocks WHERE discord_id = $1 AND expires_at > NOW()',
+    [message.author.id]
+  );
+
+  if (blockResult.rows.length > 0) {
+    const messageWords = message.content.toLowerCase().split(/\s+/);
+    const foundSwear = messageWords.some(word =>
+      SWEAR_WORDS.includes(word.replace(/[^a-z-]/g, ''))
+    );
+
+    if (foundSwear) {
+      await message.delete();
+      const expiresAt = new Date(blockResult.rows[0].expires_at);
+      const daysLeft = Math.ceil((expiresAt - new Date()) / (1000 * 60 * 60 * 24));
+      await message.channel.send(`⛔ <@${message.author.id}> You are blocked from using swear words for **${daysLeft}** more day(s).`);
+      return;
+    }
+  }
+
+  // Public — anyone can see titles
+  if (message.content.startsWith('!whois')) {
+    const mentioned = message.mentions.members.first();
+    const targetId = mentioned ? mentioned.id : message.author.id;
+
+    const result = await pool.query('SELECT * FROM verified_users WHERE discord_id = $1', [targetId]);
+    const user = result.rows[0];
+
+    if (!user) return message.reply('❌ That user has not verified yet.');
+
+    const embed = new EmbedBuilder()
+      .setTitle(`🏷️ ${user.display_name}`)
+      .addFields(
+        { name: 'Grade', value: `${user.grade}th Grade`, inline: true },
+        { name: 'Title', value: user.display_name, inline: true }
+      )
+      .setColor(user.grade === '7' ? 0x5865F2 : 0x57F287);
+
+    message.reply({ embeds: [embed] });
+  }
+
+  // Admin only — block swearing for a user
+  // Usage: !swearblock @user 7
+  if (message.content.startsWith('!swearblock')) {
+    if (message.author.id !== OWNER_ID) {
+      message.reply('❌ You do not have permission to use this command.');
+      return;
+    }
+
+    const mentioned = message.mentions.members.first();
+    if (!mentioned) return message.reply('❌ Mention someone! Example: `!swearblock @John 7`');
+
+    const args = message.content.split(' ');
+    const days = parseInt(args[args.length - 1]);
+
+    if (isNaN(days) || days < 1) {
+      return message.reply('❌ Please provide a number of days! Example: `!swearblock @John 7`');
+    }
+
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + days);
+
+    await pool.query(`
+      INSERT INTO swear_blocks (discord_id, expires_at)
+      VALUES ($1, $2)
+      ON CONFLICT (discord_id) DO UPDATE SET expires_at = $2
+    `, [mentioned.id, expiresAt]);
+
+    message.reply(`✅ <@${mentioned.id}> has been swear blocked for **${days}** day(s).`);
+  }
+
+  // Admin only — unblock swearing for a user
+  // Usage: !swearunblock @user
+  if (message.content.startsWith('!swearunblock')) {
+    if (message.author.id !== OWNER_ID) {
+      message.reply('❌ You do not have permission to use this command.');
+      return;
+    }
+
+    const mentioned = message.mentions.members.first();
+    if (!mentioned) return message.reply('❌ Mention someone! Example: `!swearunblock @John`');
+
+    await pool.query('DELETE FROM swear_blocks WHERE discord_id = $1', [mentioned.id]);
+    message.reply(`✅ <@${mentioned.id}> has been swear unblocked!`);
+  }
+
+  // Admin only — shows full name privately via DM
+  if (message.content.startsWith('!lookup')) {
+    if (message.author.id !== OWNER_ID) {
+      message.reply('❌ You do not have permission to use this command.');
+      return;
+    }
+
+    const mentioned = message.mentions.members.first();
+    if (!mentioned) return message.reply('Mention someone! Example: `!lookup @John`');
+
+    const result = await pool.query('SELECT * FROM verified_users WHERE discord_id = $1', [mentioned.id]);
+    const user = result.rows[0];
+
+    if (!user) return message.reply('❌ That user has not verified yet.');
+
+    try {
+      await message.author.send(`🔒 Full name: **${user.first_name} ${user.last_name}** | Grade: **${user.grade}th**`);
+      await message.delete();
+    } catch (err) {
+      message.reply('❌ Could not send you a DM! Make sure your DMs are open.');
+    }
   }
 });
 
@@ -120,7 +255,6 @@ client.on('interactionCreate', async (interaction) => {
     const lastInitial = lastName[0].toUpperCase();
     const displayName = `${firstName} ${lastInitial}.`;
 
-    // Save to PostgreSQL
     await pool.query(`
       INSERT INTO verified_users (discord_id, first_name, last_name, grade, display_name)
       VALUES ($1, $2, $3, $4, $5)
@@ -145,54 +279,6 @@ client.on('interactionCreate', async (interaction) => {
       content: `✅ Verified as **Grade ${grade}**!\n🏷️ Your title is: **${displayName}**\n\nYour last name is kept private.`,
       ephemeral: true
     });
-  }
-});
-
-client.on('messageCreate', async (message) => {
-  if (message.author.bot) return;
-
-  // Public — anyone can see titles
-  if (message.content.startsWith('!whois')) {
-    const mentioned = message.mentions.members.first();
-    const targetId = mentioned ? mentioned.id : message.author.id;
-
-    const result = await pool.query('SELECT * FROM verified_users WHERE discord_id = $1', [targetId]);
-    const user = result.rows[0];
-
-    if (!user) return message.reply('❌ That user has not verified yet.');
-
-    const embed = new EmbedBuilder()
-      .setTitle(`🏷️ ${user.display_name}`)
-      .addFields(
-        { name: 'Grade', value: `${user.grade}th Grade`, inline: true },
-        { name: 'Title', value: user.display_name, inline: true }
-      )
-      .setColor(user.grade === '7' ? 0x5865F2 : 0x57F287);
-
-    message.reply({ embeds: [embed] });
-  }
-
-  // Admin only — sends full name to your DMs privately
-  if (message.content.startsWith('!lookup')) {
-    if (message.author.id !== OWNER_ID) {
-      message.reply('❌ You do not have permission to use this command.');
-      return;
-    }
-
-    const mentioned = message.mentions.members.first();
-    if (!mentioned) return message.reply('Mention someone! Example: `!lookup @John`');
-
-    const result = await pool.query('SELECT * FROM verified_users WHERE discord_id = $1', [mentioned.id]);
-    const user = result.rows[0];
-
-    if (!user) return message.reply('❌ That user has not verified yet.');
-
-    try {
-      await message.author.send(`🔒 Full name: **${user.first_name} ${user.last_name}** | Grade: **${user.grade}th**`);
-      await message.delete();
-    } catch (err) {
-      message.reply('❌ Could not send you a DM! Make sure your DMs are open.');
-    }
   }
 });
 
