@@ -152,7 +152,7 @@ client.on('messageCreate', async (message) => {
     message.reply({ embeds: [embed] });
   }
 
-  // Admin only — shows full name privately
+  // Admin only — sends full name to your DMs privately
   if (message.content.startsWith('!lookup')) {
     if (message.author.id !== OWNER_ID) {
       message.reply('❌ You do not have permission to use this command.');
@@ -165,7 +165,14 @@ client.on('messageCreate', async (message) => {
     const user = db.prepare('SELECT * FROM verified_users WHERE discord_id = ?').get(mentioned.id);
     if (!user) return message.reply('❌ That user has not verified yet.');
 
-    message.reply({ content: `🔒 Full name: **${user.first_name} ${user.last_name}** | Grade: **${user.grade}th**`, ephemeral: true });
+    try {
+      // Send result to your DMs instead of the channel
+      await message.author.send(`🔒 Full name: **${user.first_name} ${user.last_name}** | Grade: **${user.grade}th**`);
+      // Delete your command message so nobody sees it
+      await message.delete();
+    } catch (err) {
+      message.reply('❌ Could not send you a DM! Make sure your DMs are open.');
+    }
   }
 });
 
