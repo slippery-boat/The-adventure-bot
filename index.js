@@ -58,6 +58,7 @@ const OWNER_ID = process.env.OWNER_ID;
 
 client.once('ready', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
+  console.log(`OWNER_ID: ${OWNER_ID}`);
   await setupDatabase();
   await postVerifyMessage();
 });
@@ -100,9 +101,11 @@ client.on('guildMemberRemove', async (member) => {
   }
 });
 
-// Check messages for swear words
+// Check messages for swear words and commands
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
+
+  console.log(`📨 Message from ${message.author.tag}: ${message.content}`);
 
   // Check if user is swear blocked
   const blockResult = await pool.query(
@@ -147,8 +150,11 @@ client.on('messageCreate', async (message) => {
   }
 
   // Admin only — block swearing for a user
-  // Usage: !swearblock @user 7
   if (message.content.startsWith('!swearblock')) {
+    console.log(`🔍 Swearblock command from ${message.author.tag} (ID: ${message.author.id})`);
+    console.log(`🔍 OWNER_ID is: ${OWNER_ID}`);
+    console.log(`🔍 Match: ${message.author.id === OWNER_ID}`);
+
     if (message.author.id !== OWNER_ID) {
       message.reply('❌ You do not have permission to use this command.');
       return;
@@ -177,7 +183,6 @@ client.on('messageCreate', async (message) => {
   }
 
   // Admin only — unblock swearing for a user
-  // Usage: !swearunblock @user
   if (message.content.startsWith('!swearunblock')) {
     if (message.author.id !== OWNER_ID) {
       message.reply('❌ You do not have permission to use this command.');
