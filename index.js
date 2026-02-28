@@ -30,6 +30,8 @@ const OWNER_ID = process.env.OWNER_ID;
 
 client.once('ready', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
+  console.log(`GRADE_7_ROLE_ID: ${GRADE_7_ROLE_ID}`);
+  console.log(`GRADE_8_ROLE_ID: ${GRADE_8_ROLE_ID}`);
   await postVerifyMessage();
 });
 
@@ -108,13 +110,17 @@ client.on('interactionCreate', async (interaction) => {
     const member = interaction.member;
     const roleId = grade === '7' ? GRADE_7_ROLE_ID : GRADE_8_ROLE_ID;
 
+    console.log(`Trying to assign role ${roleId} to ${member.user.tag}`);
+
     try {
       const otherRoleId = grade === '7' ? GRADE_8_ROLE_ID : GRADE_7_ROLE_ID;
       if (member.roles.cache.has(otherRoleId)) await member.roles.remove(otherRoleId);
       await member.roles.add(roleId);
+      console.log(`✅ Role assigned successfully to ${member.user.tag}`);
       await member.setNickname(displayName);
+      console.log(`✅ Nickname set to ${displayName}`);
     } catch (err) {
-      console.error('Could not set role/nickname:', err.message);
+      console.error('Could not set role/nickname full error:', err);
     }
 
     await interaction.reply({
@@ -146,7 +152,7 @@ client.on('messageCreate', async (message) => {
     message.reply({ embeds: [embed] });
   }
 
-  // Admin only — shows full name
+  // Admin only — shows full name privately
   if (message.content.startsWith('!lookup')) {
     if (message.author.id !== OWNER_ID) {
       message.reply('❌ You do not have permission to use this command.');
@@ -159,7 +165,7 @@ client.on('messageCreate', async (message) => {
     const user = db.prepare('SELECT * FROM verified_users WHERE discord_id = ?').get(mentioned.id);
     if (!user) return message.reply('❌ That user has not verified yet.');
 
-    message.reply(`🔒 Full name: **${user.first_name} ${user.last_name}** | Grade: **${user.grade}th**`);
+    message.reply({ content: `🔒 Full name: **${user.first_name} ${user.last_name}** | Grade: **${user.grade}th**`, ephemeral: true });
   }
 });
 
