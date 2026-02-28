@@ -1,5 +1,5 @@
 const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, EmbedBuilder } = require('discord.js');
-const Database = require('better-sqlite3');
+const { Pool } = require('pg');
 
 const client = new Client({
   intents: [
@@ -11,16 +11,25 @@ const client = new Client({
   ]
 });
 
-const db = new Database('users.db');
-db.exec(`
-  CREATE TABLE IF NOT EXISTS verified_users (
-    discord_id TEXT PRIMARY KEY,
-    first_name TEXT,
-    last_name TEXT,
-    grade TEXT,
-    display_name TEXT
-  )
-`);
+// PostgreSQL connection
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
+
+// Create table if it doesn't exist
+async function setupDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS verified_users (
+      discord_id TEXT PRIMARY KEY,
+      first_name TEXT,
+      last_name TEXT,
+      grade TEXT,
+      display_name TEXT
+    )
+  `);
+  console.log('✅ Database ready');
+}
 
 const TOKEN = process.env.TOKEN;
 const VERIFY_CHANNEL_ID = process.env.VERIFY_CHANNEL_ID;
@@ -30,8 +39,7 @@ const OWNER_ID = process.env.OWNER_ID;
 
 client.once('ready', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
-  console.log(`GRADE_7_ROLE_ID: ${GRADE_7_ROLE_ID}`);
-  console.log(`GRADE_8_ROLE_ID: ${GRADE_8_ROLE_ID}`);
+  await setupDatabase();
   await postVerifyMessage();
 });
 
@@ -61,6 +69,16 @@ async function postVerifyMessage() {
 
   await channel.send({ embeds: [embed], components: [row] });
 }
+
+// Auto-unverify when someone leaves the server
+client.on('guildMemberRemove', async (member) => {
+  try {
+    await pool.query('DELETE FROM verified_users WHERE discord_id = $1', [member.id]);
+    console.log(`🗑️ Removed ${member.user.tag} from database (left server)`);
+  } catch (err) {
+    console.error('Error removing user from database:', err);
+  }
+});
 
 client.on('interactionCreate', async (interaction) => {
 
@@ -102,25 +120,25 @@ client.on('interactionCreate', async (interaction) => {
     const lastInitial = lastName[0].toUpperCase();
     const displayName = `${firstName} ${lastInitial}.`;
 
-    db.prepare(`
-      INSERT OR REPLACE INTO verified_users (discord_id, first_name, last_name, grade, display_name)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(interaction.user.id, firstName, lastName, grade, displayName);
+    // Save to PostgreSQL
+    await pool.query(`
+      INSERT INTO verified_users (discord_id, first_name, last_name, grade, display_name)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (discord_id) DO UPDATE
+      SET first_name = $2, last_name = $3, grade = $4, display_name = $5
+    `, [interaction.user.id, firstName, lastName, grade, displayName]);
 
     const member = interaction.member;
     const roleId = grade === '7' ? GRADE_7_ROLE_ID : GRADE_8_ROLE_ID;
-
-    console.log(`Trying to assign role ${roleId} to ${member.user.tag}`);
 
     try {
       const otherRoleId = grade === '7' ? GRADE_8_ROLE_ID : GRADE_7_ROLE_ID;
       if (member.roles.cache.has(otherRoleId)) await member.roles.remove(otherRoleId);
       await member.roles.add(roleId);
-      console.log(`✅ Role assigned successfully to ${member.user.tag}`);
       await member.setNickname(displayName);
-      console.log(`✅ Nickname set to ${displayName}`);
+      console.log(`✅ Verified ${member.user.tag} as grade ${grade} with name ${displayName}`);
     } catch (err) {
-      console.error('Could not set role/nickname full error:', err);
+      console.error('Could not set role/nickname:', err);
     }
 
     await interaction.reply({
@@ -138,7 +156,9 @@ client.on('messageCreate', async (message) => {
     const mentioned = message.mentions.members.first();
     const targetId = mentioned ? mentioned.id : message.author.id;
 
-    const user = db.prepare('SELECT * FROM verified_users WHERE discord_id = ?').get(targetId);
+    const result = await pool.query('SELECT * FROM verified_users WHERE discord_id = $1', [targetId]);
+    const user = result.rows[0];
+
     if (!user) return message.reply('❌ That user has not verified yet.');
 
     const embed = new EmbedBuilder()
@@ -162,13 +182,13 @@ client.on('messageCreate', async (message) => {
     const mentioned = message.mentions.members.first();
     if (!mentioned) return message.reply('Mention someone! Example: `!lookup @John`');
 
-    const user = db.prepare('SELECT * FROM verified_users WHERE discord_id = ?').get(mentioned.id);
+    const result = await pool.query('SELECT * FROM verified_users WHERE discord_id = $1', [mentioned.id]);
+    const user = result.rows[0];
+
     if (!user) return message.reply('❌ That user has not verified yet.');
 
     try {
-      // Send result to your DMs instead of the channel
       await message.author.send(`🔒 Full name: **${user.first_name} ${user.last_name}** | Grade: **${user.grade}th**`);
-      // Delete your command message so nobody sees it
       await message.delete();
     } catch (err) {
       message.reply('❌ Could not send you a DM! Make sure your DMs are open.');
