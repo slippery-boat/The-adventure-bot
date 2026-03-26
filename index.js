@@ -237,15 +237,13 @@ client.on('messageCreate', async (message) => {
       return message.reply('❌ You need to be verified to send a confession!');
     }
 
-    // Check if receiver is verified
-    const receiverResult = await pool.query('SELECT * FROM verified_users WHERE discord_id = $1', [mentioned.id]);
-    if (!receiverResult.rows[0]) {
-      return message.reply('❌ That person is not verified!');
-    }
-
     const args = message.content.split(' ');
     const confessionText = args.slice(2).join(' ');
     if (!confessionText) return message.reply('❌ Please include a message! Example: `!confess @John you are really cool`');
+
+    // Use their display name if verified, otherwise their server nickname or username
+    const receiverResult = await pool.query('SELECT * FROM verified_users WHERE discord_id = $1', [mentioned.id]);
+    const receiverName = receiverResult.rows[0] ? receiverResult.rows[0].display_name : (mentioned.nickname || mentioned.user.username);
 
     // Delete original message so nobody sees who sent it
     await message.delete();
@@ -256,7 +254,7 @@ client.on('messageCreate', async (message) => {
 
     const embed = new EmbedBuilder()
       .setTitle('💌 A Confession')
-      .setDescription(`This message is for **${receiverResult.rows[0].display_name}**\n\n"${confessionText}"\n\n— Anonymous`)
+      .setDescription(`This message is for **${receiverName}**\n\n"${confessionText}"\n\n— Anonymous`)
       .setColor(0xFF69B4);
 
     await confessionsChannel.send({ embeds: [embed] });
