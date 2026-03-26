@@ -521,22 +521,19 @@ client.on('messageCreate', async (message) => {
   // DM the approver
   try {
     const approver = await client.users.fetch(APPROVER_ID);
-    const embed = new EmbedBuilder()
-      .setTitle('📋 New Verification Request')
-      .addFields(
-        { name: 'User', value: `<@${message.author.id}> (${message.author.tag})`, inline: true },
-        { name: 'Name', value: `${first_name} ${last_name}`, inline: true },
-        { name: 'Grade', value: `${grade}th Grade`, inline: true }
-      )
-      .setImage(screenshotUrl)
-      .setColor(0x5865F2);
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`approve_${message.author.id}`).setLabel('✅ Accept').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`decline_${message.author.id}`).setLabel('❌ Decline').setStyle(ButtonStyle.Danger)
     );
 
-    await approver.send({ embeds: [embed], components: [row] });
+    // Send info text first
+    await approver.send(`📋 **New Verification Request**\n👤 User: ${message.author.tag} (<@${message.author.id}>)\n📝 Name: **${first_name} ${last_name}**\n🎓 Grade: **${grade}th Grade**\n🖼️ Schedule screenshot below:`);
+
+    // Send the actual image file as attachment so it always loads
+    const attachment = message.attachments.first();
+    await approver.send({ files: [{ attachment: attachment.url, name: attachment.name }], components: [row] });
+
   } catch (err) {
     console.error('Could not DM approver:', err);
   }
