@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, EmbedBuilder, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const { Pool } = require('pg');
 
 const client = new Client({
@@ -85,6 +85,7 @@ async function setupDatabase() {
 }
 
 const TOKEN = process.env.TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID;
 const VERIFY_CHANNEL_ID = process.env.VERIFY_CHANNEL_ID;
 const GRADE_5_ROLE_ID = process.env.GRADE_5_ROLE_ID;
 const GRADE_6_ROLE_ID = process.env.GRADE_6_ROLE_ID;
@@ -94,6 +95,25 @@ const OWNER_ID = process.env.OWNER_ID;
 const ADMIN_ROLE_ID = process.env.ADMIN_ROLE_ID;
 const APPROVER_ID = process.env.APPROVER_ID;
 const CONFESSIONS_CHANNEL_ID = process.env.CONFESSIONS_CHANNEL_ID;
+
+// Register slash commands
+const commands = [
+  new SlashCommandBuilder()
+    .setName('confess')
+    .setDescription('Send an anonymous love confession')
+    .addUserOption(option => option.setName('user').setDescription('Who is the confession for?').setRequired(true))
+    .addStringOption(option => option.setName('message').setDescription('Your confession message').setRequired(true))
+].map(cmd => cmd.toJSON());
+
+const rest = new REST({ version: '10' }).setToken(TOKEN);
+(async () => {
+  try {
+    await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
+    console.log('✅ Slash commands registered');
+  } catch (err) {
+    console.error('Error registering slash commands:', err);
+  }
+})();
 
 // Get role ID by grade
 function getRoleId(grade) {
@@ -226,40 +246,6 @@ client.on('messageCreate', async (message) => {
     message.reply({ embeds: [embed] });
   }
 
-  // Confessions — verified members only
-  if (message.content.startsWith('!confess')) {
-    const mentioned = message.mentions.members.first();
-    if (!mentioned) return message.reply('❌ Mention someone! Example: `!confess @John you are really cool`');
-
-    // Check if sender is verified
-    const senderResult = await pool.query('SELECT * FROM verified_users WHERE discord_id = $1', [message.author.id]);
-    if (!senderResult.rows[0]) {
-      return message.reply('❌ You need to be verified to send a confession!');
-    }
-
-    const args = message.content.split(' ');
-    const confessionText = args.slice(2).join(' ');
-    if (!confessionText) return message.reply('❌ Please include a message! Example: `!confess @John you are really cool`');
-
-    // Use their display name if verified, otherwise their server nickname or username
-    const receiverResult = await pool.query('SELECT * FROM verified_users WHERE discord_id = $1', [mentioned.id]);
-    const receiverName = receiverResult.rows[0] ? receiverResult.rows[0].display_name : (mentioned.nickname || mentioned.user.username);
-
-    // Delete original message so nobody sees who sent it
-    await message.delete();
-
-    // Post confession anonymously
-    const confessionsChannel = await client.channels.fetch(CONFESSIONS_CHANNEL_ID);
-    if (!confessionsChannel) return;
-
-    const embed = new EmbedBuilder()
-      .setTitle('💌 A Confession')
-      .setDescription(`This message is for **${receiverName}**\n\n"${confessionText}"\n\n— Anonymous`)
-      .setColor(0xFF69B4);
-
-    await confessionsChannel.send({ embeds: [embed] });
-  }
-
   // Admin only — mute a user
   if (message.content.startsWith('!mute')) {
     if (!isAdmin(message)) return message.reply('❌ You do not have permission to use this command.');
@@ -379,6 +365,38 @@ client.on('messageCreate', async (message) => {
 });
 
 client.on('interactionCreate', async (interaction) => {
+
+  // /confess slash command
+  if (interaction.isChatInputCommand() && interaction.commandName === 'confess') {
+    // Check if sender is verified
+    const senderResult = await pool.query('SELECT * FROM verified_users WHERE discord_id = $1', [interaction.user.id]);
+    if (!senderResult.rows[0]) {
+      await interaction.reply({ content: '❌ You need to be verified to send a confession!', ephemeral: true });
+      return;
+    }
+
+    const mentioned = interaction.options.getMember('user');
+    const confessionText = interaction.options.getString('message');
+
+    // Use their display name if verified, otherwise nickname or username
+    const receiverResult = await pool.query('SELECT * FROM verified_users WHERE discord_id = $1', [mentioned.id]);
+    const receiverName = receiverResult.rows[0] ? receiverResult.rows[0].display_name : (mentioned.nickname || mentioned.user.username);
+
+    // Reply ephemerally so only sender sees confirmation
+    await interaction.reply({ content: '💌 Your confession has been sent anonymously!', ephemeral: true });
+
+    // Post confession anonymously in confessions channel
+    const confessionsChannel = await client.channels.fetch(CONFESSIONS_CHANNEL_ID);
+    if (!confessionsChannel) return;
+
+    const embed = new EmbedBuilder()
+      .setTitle('💌 A Confession')
+      .setDescription(`This message is for **${receiverName}**\n\n"${confessionText}"\n\n— Anonymous`)
+      .setColor(0xFF69B4);
+
+    await confessionsChannel.send({ embeds: [embed] });
+    return;
+  }
 
   // Grade buttons
   if (interaction.isButton() && ['grade_5', 'grade_6', 'grade_7', 'grade_8'].includes(interaction.customId)) {
