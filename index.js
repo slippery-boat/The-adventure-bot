@@ -296,14 +296,18 @@ client.on('interactionCreate', async (interaction) => {
     const confessionText = interaction.options.getString('message');
     const receiverResult = await pool.query('SELECT * FROM verified_users WHERE discord_id = $1', [mentioned.id]);
     const receiverName = receiverResult.rows[0] ? receiverResult.rows[0].display_name : (mentioned.nickname || mentioned.user.username);
-    await interaction.reply({ content: '💌 Your confession has been sent anonymously!', ephemeral: true });
-    const confessionsChannel = await client.channels.fetch(CONFESSIONS_CHANNEL_ID);
-    if (!confessionsChannel) return;
+
     const embed = new EmbedBuilder()
-      .setTitle('💌 A Confession')
-      .setDescription(`This message is for **${receiverName}**\n\n"${confessionText}"\n\n— Anonymous`)
+      .setTitle('💌 You have a secret confession!')
+      .setDescription(`"${confessionText}"\n\n— Anonymous`)
       .setColor(0xFF69B4);
-    return confessionsChannel.send({ embeds: [embed] });
+
+    try {
+      await mentioned.send({ embeds: [embed] });
+      return interaction.reply({ content: '💌 Your confession has been sent anonymously!', ephemeral: true });
+    } catch (err) {
+      return interaction.reply({ content: '❌ Could not send the confession — that person may have DMs turned off!', ephemeral: true });
+    }
   }
 
   // /mute
