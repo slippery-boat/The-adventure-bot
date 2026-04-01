@@ -190,7 +190,7 @@ async function postVerifyMessage() {
 
   const embed = new EmbedBuilder()
     .setTitle('✅ Server Verification')
-    .setDescription('Welcome! To gain access to the server please verify below.\n\n**Step 1:** Choose your grade\n**Step 2:** Enter your full name\n**Step 3:** Upload a screenshot of your Infinite Campus schedule')
+    .setDescription('Welcome! To gain access to the server please verify below.\n\n**Step 1:** Choose your grade\n**Step 2:** Enter your full name\n**Step 3:** Upload a screenshot of your Google Classroom')
     .setColor(0x5865F2);
 
   const row = new ActionRowBuilder().addComponents(
@@ -461,7 +461,7 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isButton() && interaction.customId.startsWith('decline_')) {
     const userId = interaction.customId.split('_')[1];
     await pool.query('DELETE FROM pending_verifications WHERE discord_id = $1', [userId]);
-    try { const user = await client.users.fetch(userId); await user.send(`❌ Your verification was **declined**. Please try again with a clear screenshot of your Infinite Campus schedule.`); } catch (e) {}
+    try { const user = await client.users.fetch(userId); await user.send(`❌ Your verification was **declined**. Please try again with a clear screenshot of your Google Classroom.`); } catch (e) {}
     return interaction.update({ content: `❌ Declined verification for user ${userId}`, components: [] });
   }
 
@@ -474,7 +474,7 @@ client.on('interactionCreate', async (interaction) => {
     const firstName = parts[0];
     const lastName = parts[parts.length - 1];
     await pool.query(`INSERT INTO pending_verifications (discord_id, first_name, last_name, grade) VALUES ($1, $2, $3, $4) ON CONFLICT (discord_id) DO UPDATE SET first_name=$2, last_name=$3, grade=$4`, [interaction.user.id, firstName, lastName, grade]);
-    return interaction.reply({ content: `✅ Name saved! Now upload a **screenshot of your Infinite Campus schedule** in the verify channel.\n\nGo to Infinite Campus → Click **Schedule** → Take a screenshot and send it in <#${VERIFY_CHANNEL_ID}>.`, ephemeral: true });
+    return interaction.reply({ content: `✅ Name saved! Now upload a **screenshot of your Google Classroom** in the verify channel.\n\nGo to Google Classroom → Take a screenshot of your classes and send it in <#${VERIFY_CHANNEL_ID}>.`, ephemeral: true });
   }
 });
 
