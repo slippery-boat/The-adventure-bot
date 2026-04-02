@@ -237,7 +237,9 @@ client.on('messageCreate', async (message) => {
 
     await message.delete();
     const sent = await message.channel.send(`<@${message.author.id}> Your verification request has been submitted! Please wait for approval.`);
-    setTimeout(() => sent.delete().catch(() => {}), 10000);
+    setTimeout(async () => {
+      try { await sent.delete(); } catch (e) { console.error('Could not delete message:', e.message); }
+    }, 5000);
     return;
   }
 
