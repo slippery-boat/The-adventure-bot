@@ -57,6 +57,9 @@ async function setupDatabase() {
   await pool.query(`CREATE TABLE IF NOT EXISTS pending_verifications (
     discord_id TEXT PRIMARY KEY, first_name TEXT, last_name TEXT, grade TEXT, screenshot_url TEXT
   )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS user_games (
+    discord_id TEXT, game TEXT, PRIMARY KEY (discord_id, game)
+  )`);
   console.log('✅ Database ready');
 }
 
@@ -149,6 +152,29 @@ const commands = [
     .setName('lookup')
     .setDescription('Look up someone\'s full name (sent to your DMs privately)')
     .addUserOption(o => o.setName('user').setDescription('Who to look up').setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName('gameselect')
+    .setDescription('Add a game to your profile')
+    .addStringOption(o => o.setName('game').setDescription('What game do you play?').setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName('gameremove')
+    .setDescription('Remove a game from your profile')
+    .addStringOption(o => o.setName('game').setDescription('What game do you want to remove?').setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName('gameping')
+    .setDescription('Ping everyone who plays a game')
+    .addStringOption(o => o.setName('game').setDescription('What game?').setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName('mygames')
+    .setDescription('See all the games on your profile'),
+
+  new SlashCommandBuilder()
+    .setName('games')
+    .setDescription('See all games and how many people play each one'),
 
 ].map(cmd => cmd.toJSON());
 
@@ -409,6 +435,59 @@ client.on('interactionCreate', async (interaction) => {
     } catch (err) {
       return interaction.reply({ content: '❌ Could not send you a DM!', ephemeral: true });
     }
+  }
+
+  // /gameselect
+  if (interaction.isChatInputCommand() && interaction.commandName === 'gameselect') {
+    const game = interaction.options.getString('game').toLowerCase().trim();
+    await pool.query('INSERT INTO user_games (discord_id, game) VALUES ($1, $2) ON CONFLICT DO NOTHING', [interaction.user.id, game]);
+    return interaction.reply({ content: `✅ **${game}** has been added to your profile!`, ephemeral: true });
+  }
+
+  // /gameremove
+  if (interaction.isChatInputCommand() && interaction.commandName === 'gameremove') {
+    const game = interaction.options.getString('game').toLowerCase().trim();
+    const result = await pool.query('DELETE FROM user_games WHERE discord_id = $1 AND game = $2', [interaction.user.id, game]);
+    if (result.rowCount === 0) return interaction.reply({ content: `❌ You don't have **${game}** on your profile!`, ephemeral: true });
+    return interaction.reply({ content: `✅ **${game}** has been removed from your profile!`, ephemeral: true });
+  }
+
+  // /gameping — verified only
+  if (interaction.isChatInputCommand() && interaction.commandName === 'gameping') {
+    const verifiedResult = await pool.query('SELECT * FROM verified_users WHERE discord_id = $1', [interaction.user.id]);
+    if (!isVerified(interaction, verifiedResult.rows[0])) return interaction.reply({ content: '❌ You need to be verified to ping a game!', ephemeral: true });
+
+    const game = interaction.options.getString('game').toLowerCase().trim();
+    const players = await pool.query('SELECT discord_id FROM user_games WHERE game = $1', [game]);
+
+    if (players.rows.length === 0) return interaction.reply({ content: `❌ Nobody has **${game}** on their profile yet!`, ephemeral: true });
+
+    const mentions = players.rows.map(r => `<@${r.discord_id}>`).join(' ');
+    return interaction.reply({ content: `🎮 **${game}** players: ${mentions}` });
+  }
+
+  // /mygames
+  if (interaction.isChatInputCommand() && interaction.commandName === 'mygames') {
+    const result = await pool.query('SELECT game FROM user_games WHERE discord_id = $1 ORDER BY game', [interaction.user.id]);
+    if (result.rows.length === 0) return interaction.reply({ content: '❌ You have no games on your profile! Use `/gameselect` to add some.', ephemeral: true });
+    const gameList = result.rows.map(r => `• ${r.game}`).join('\n');
+    const embed = new EmbedBuilder()
+      .setTitle('🎮 Your Games')
+      .setDescription(gameList)
+      .setColor(0x5865F2);
+    return interaction.reply({ embeds: [embed], ephemeral: true });
+  }
+
+  // /games
+  if (interaction.isChatInputCommand() && interaction.commandName === 'games') {
+    const result = await pool.query('SELECT game, COUNT(*) as count FROM user_games GROUP BY game ORDER BY count DESC, game');
+    if (result.rows.length === 0) return interaction.reply({ content: '❌ No games have been added yet!', ephemeral: true });
+    const gameList = result.rows.map(r => `• **${r.game}** — ${r.count} player(s)`).join('\n');
+    const embed = new EmbedBuilder()
+      .setTitle('🎮 All Games')
+      .setDescription(gameList)
+      .setColor(0x57F287);
+    return interaction.reply({ embeds: [embed] });
   }
 
   // Grade buttons
